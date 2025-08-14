@@ -1,0 +1,626 @@
+<!doctype html>
+<html lang="cs">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Yellow Car Detector</title>
+  <meta name="description" content="Realtime detektor žlutých aut – běží čistě v prohlížeči." />
+  <style>
+    :root {
+      --bg: #0b0c10;
+      --card: #11131a;
+      --text: #e8e8e8;
+      --muted: #9aa3af;
+      --accent: #ffd200;
+      --accent-2: #ffbf00;
+      --good: #34d399;
+      --bad: #ef4444;
+    }
+    * { box-sizing: border-box; }
+    html, body { height: 100%; }
+    body {
+      margin: 0;
+      font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Ubuntu, Cantarell, Noto Sans, 'Helvetica Neue', Arial, 'Apple Color Emoji', 'Segoe UI Emoji';
+      background: radial-gradient(1200px 900px at 80% -10%, #1b1e29 0%, var(--bg) 50%);
+      color: var(--text);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 16px;
+    }
+    .app {
+      width: 100%;
+      max-width: 920px;
+      display: grid;
+      grid-template-columns: 1.2fr 1fr;
+      gap: 16px;
+    }
+    @media (max-width: 900px) {
+      .app { grid-template-columns: 1fr; }
+    }
+    .card {
+      background: linear-gradient(180deg, rgba(255,255,255,0.02), rgba(255,255,255,0.0));
+      border: 1px solid rgba(255,255,255,0.06);
+      border-radius: 16px;
+      box-shadow: 0 10px 30px rgba(0,0,0,0.35);
+      overflow: hidden;
+    }
+    .card h2 {
+      margin: 0;
+      padding: 14px 16px;
+      border-bottom: 1px solid rgba(255,255,255,0.06);
+      background: rgba(255, 210, 0, 0.06);
+      font-weight: 600;
+    }
+    .video-wrap {
+      position: relative;
+      background:#000;
+      aspect-ratio: 16/10;
+    }
+    video {
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+      display: block;
+      background:#000;
+    }
+    canvas.overlay {
+      position:absolute;
+      inset:0;
+      pointer-events:none;
+    }
+    .controls {
+      display: grid;
+      grid-template-columns: repeat(2, 1fr);
+      gap: 10px;
+      padding: 12px;
+    }
+    .controls > * { width: 100%; }
+    button, select, input[type="range"] {
+      border-radius: 10px;
+      border: 1px solid rgba(255,255,255,0.12);
+      padding: 10px 12px;
+      background: #151826;
+      color: var(--text);
+      font-size: 14px;
+      outline: none;
+    }
+    button {
+      cursor: pointer;
+      font-weight: 600;
+      transition: transform .04s ease, background .2s ease, border-color .2s ease;
+    }
+    button:hover { background:#1a1e30; }
+    button:active { transform: translateY(1px); }
+    .btn-accent { border-color: rgba(255,210,0,0.5); background: #1a1830; }
+    .row { display:flex; gap:10px; align-items:center; }
+    .stack { display:flex; flex-direction:column; gap:6px; }
+    label { color: var(--muted); font-size: 12px; }
+    .meter {
+      height: 10px; border-radius: 999px;
+      background: rgba(255,255,255,0.08); overflow: hidden;
+    }
+    .meter > span {
+      display:block; height:100%; width:0%;
+      background: linear-gradient(90deg, var(--accent), var(--accent-2));
+      transition: width .2s linear;
+    }
+    .stat {
+      padding: 12px 16px;
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 12px;
+    }
+    .stat .item {
+      background: rgba(255,255,255,0.03);
+      border: 1px solid rgba(255,255,255,0.06);
+      padding: 10px 12px;
+      border-radius: 12px;
+    }
+    .badge {
+      display:inline-flex; align-items:center; gap:8px;
+      padding: 6px 10px; border-radius: 999px;
+      border: 1px solid rgba(255,255,255,0.15);
+      background: rgba(255, 210, 0, 0.1);
+      font-weight:600;
+    }
+    .swatch {
+      width: 20px; height: 20px; border-radius: 6px;
+      border:1px solid rgba(255,255,255,0.5);
+    }
+    .footnote { color: var(--muted); font-size: 12px; padding: 6px 14px 14px; }
+    .legend { font-size: 12px; color: var(--muted); display:flex; gap:8px; align-items:center; padding-left:14px; padding-bottom:8px;}
+    .legend .dot { width:10px; height:10px; border-radius:999px; background: var(--accent); display:inline-block;}
+    .toggle {
+      display:inline-flex; align-items:center; gap:8px; user-select:none; cursor:pointer;
+    }
+    .toggle input { appearance:none; width:40px; height:22px; background:#1d2235; border-radius:999px; position:relative; outline:none; border:1px solid rgba(255,255,255,0.1); transition:background .2s ease; }
+    .toggle input:checked { background:#3b486b; }
+    .toggle input::after { content:""; width:18px; height:18px; border-radius:999px; background:#fff; position:absolute; top:1px; left:1px; transition:left .2s ease; }
+    .toggle input:checked::after { left:21px; }
+    .small { font-size: 12px; color: var(--muted); }
+    .roi-tip { padding: 0 14px 10px; color: var(--muted); font-size: 12px; }
+    .link { color: #8ab4ff; text-decoration: none; }
+  </style>
+</head>
+<body>
+  <div class="app">
+    <section class="card">
+      <h2>Žluté auto – detektor (realtime)</h2>
+      <div class="video-wrap" id="videoWrap">
+        <video id="video" playsinline muted></video>
+        <canvas class="overlay" id="overlay"></canvas>
+      </div>
+      <div class="legend"><span class="dot"></span> zvýraznění žluté masky (v náhledu)</div>
+      <div class="controls">
+        <button id="startBtn" class="btn-accent">Spustit kameru</button>
+        <button id="flipBtn">Přepnout kameru</button>
+
+        <div class="stack">
+          <label>Citlivost (S práh): <span id="sVal">70</span></label>
+          <input id="sRange" type="range" min="40" max="140" step="2" value="70"/>
+        </div>
+        <div class="stack">
+          <label>Jas (V práh): <span id="vVal">120</span></label>
+          <input id="vRange" type="range" min="80" max="200" step="2" value="120"/>
+        </div>
+
+        <div class="row">
+          <label class="toggle">
+            <input type="checkbox" id="useRoi"/>
+          </label>
+          <div class="stack" style="flex:1">
+            <label>ROI režim (výběr oblasti přetažením)</label>
+            <span class="small">Když je zapnuto, vyhodnocuje se jen vyznačená oblast.</span>
+          </div>
+        </div>
+        <div class="row">
+          <div class="stack" style="flex:1">
+            <label>Min. pokrytí žlutou (%)</label>
+            <input id="minCoverage" type="range" min="0" max="50" step="1" value="5"/>
+          </div>
+          <div class="stack" style="width:110px">
+            <label>&nbsp;</label>
+            <span id="minCoverageLabel" style="font-weight:600">5%</span>
+          </div>
+        </div>
+
+      </div>
+      <div class="footnote">
+        Tip: namiř kameru na auto, označ ROI kolem karoserie a podle badge níže zjistíš odstín a HEX. Běží čistě v prohlížeči (žádný upload).
+      </div>
+    </section>
+
+    <section class="card">
+      <h2>Výsledek</h2>
+      <div class="stat">
+        <div class="item">
+          <div class="row" style="justify-content:space-between; align-items:center;">
+            <span>Stav</span>
+            <span id="statusBadge" class="badge">Neaktivní</span>
+          </div>
+          <div class="meter" style="margin-top:8px"><span id="confBar"></span></div>
+          <div class="row" style="justify-content:space-between; margin-top:6px;">
+            <span class="small">Jistota</span>
+            <span id="confText" class="small">0%</span>
+          </div>
+        </div>
+        <div class="item">
+          <div class="row" style="align-items:center; justify-content:space-between;">
+            <div class="stack">
+              <span>Dominantní HEX</span>
+              <code id="hexCode">—</code>
+              <span class="small">Odstín: <strong id="shadeName">—</strong></span>
+            </div>
+            <div class="swatch" id="swatch"></div>
+          </div>
+        </div>
+        <div class="item">
+          <div class="stack">
+            <span>Pokrytí žlutou</span>
+            <strong id="coverage">0%</strong>
+            <span class="small">H ∈ [20,38], S ≥ <span id="sVal2">70</span>, V ≥ <span id="vVal2">120</span></span>
+          </div>
+        </div>
+        <div class="item">
+          <div class="stack">
+            <span>Dominantní HSV</span>
+            <code id="hsvDom">—</code>
+            <span class="small">H 0–179, S 0–255, V 0–255</span>
+          </div>
+        </div>
+      </div>
+      <div class="footnote">
+        Doporučeno pro Vercel (free): statická stránka. Kód je <a class="link" href="https://vercel.com/new" target="_blank" rel="noreferrer">uploadni</a> jako nový projekt → okamžitě běží přes HTTPS.
+      </div>
+    </section>
+  </div>
+
+<script>
+(() => {
+  const video = document.getElementById('video');
+  const overlay = document.getElementById('overlay');
+  const startBtn = document.getElementById('startBtn');
+  const flipBtn = document.getElementById('flipBtn');
+  const sRange = document.getElementById('sRange');
+  const vRange = document.getElementById('vRange');
+  const sVal = document.getElementById('sVal');
+  const vVal = document.getElementById('vVal');
+  const sVal2 = document.getElementById('sVal2');
+  const vVal2 = document.getElementById('vVal2');
+  const minCoverage = document.getElementById('minCoverage');
+  const minCoverageLabel = document.getElementById('minCoverageLabel');
+
+  const statusBadge = document.getElementById('statusBadge');
+  const confBar = document.getElementById('confBar');
+  const confText = document.getElementById('confText');
+  const hexCodeEl = document.getElementById('hexCode');
+  const shadeNameEl = document.getElementById('shadeName');
+  const swatch = document.getElementById('swatch');
+  const coverageEl = document.getElementById('coverage');
+  const hsvDomEl = document.getElementById('hsvDom');
+  const useRoi = document.getElementById('useRoi');
+  const videoWrap = document.getElementById('videoWrap');
+
+  let currentStream = null;
+  let facingMode = 'environment';
+
+  // ROI selection state
+  let roiEnabled = false;
+  let roi = null; // {x,y,w,h} in overlay canvas coords
+  let dragStart = null;
+
+  function fmtPct(x){ return (x*100).toFixed(1) + '%'; }
+  function clamp(x, a, b){ return Math.max(a, Math.min(b, x)); }
+
+  // Named yellows palette
+  const NAMED = [
+    { name: 'Canary', hex: '#FFEF00' },
+    { name: 'Lemon', hex: '#FFF44F' },
+    { name: 'School Bus Yellow', hex: '#FFD800' },
+    { name: 'Amber', hex: '#FFBF00' },
+    { name: 'Gold', hex: '#FFD700' },
+    { name: 'Mustard', hex: '#E1AD01' },
+    { name: 'Maize', hex: '#FBEC5D' },
+    { name: 'Jonquil', hex: '#F4CA16' },
+  ];
+
+  function hexToRgb(hex){
+    const v = hex.replace('#','');
+    return [parseInt(v.slice(0,2),16), parseInt(v.slice(2,4),16), parseInt(v.slice(4,6),16)];
+  }
+  function rgbToHex(r,g,b){
+    const h = (n)=> ('0' + n.toString(16)).slice(-2).toUpperCase();
+    return '#' + h(r) + h(g) + h(b);
+  }
+  // sRGB -> XYZ -> Lab (D65)
+  function rgbToXyz(r,g,b){
+    let sr = r/255, sg = g/255, sb = b/255;
+    const lin = (u)=> (u <= 0.04045) ? (u/12.92) : Math.pow((u+0.055)/1.055, 2.4);
+    sr = lin(sr); sg = lin(sg); sb = lin(sb);
+    const x = sr*0.4124564 + sg*0.3575761 + sb*0.1804375;
+    const y = sr*0.2126729 + sg*0.7151522 + sb*0.0721750;
+    const z = sr*0.0193339 + sg*0.1191920 + sb*0.9503041;
+    return [x, y, z];
+  }
+  function xyzToLab(x,y,z){
+    // D65 reference white
+    const Xn=0.95047, Yn=1.00000, Zn=1.08883;
+    let fx = x/Xn, fy=y/Yn, fz=z/Zn;
+    const f = (t)=> (t>0.008856) ? Math.cbrt(t) : (7.787*t + 16/116);
+    fx=f(fx); fy=f(fy); fz=f(fz);
+    const L = 116*fy - 16;
+    const a = 500*(fx - fy);
+    const b = 200*(fy - fz);
+    return [L,a,b];
+  }
+  function rgbToLab(r,g,b){
+    const [x,y,z] = rgbToXyz(r,g,b);
+    return xyzToLab(x,y,z);
+  }
+  function deltaE(l1,a1,b1, l2,a2,b2){
+    const dl=l1-l2, da=a1-a2, db=b1-b2;
+    return Math.sqrt(dl*dl + da*da + db*db);
+  }
+  function nearestNamedYellow(r,g,b){
+    const [L1,a1,b1] = rgbToLab(r,g,b);
+    let best = null, bestD = Infinity;
+    for(const c of NAMED){
+      const [R,G,B] = hexToRgb(c.hex);
+      const [L2,a2,b2] = rgbToLab(R,G,B);
+      const d = deltaE(L1,a1,b1, L2,a2,b2);
+      if(d < bestD){ bestD = d; best = c; }
+    }
+    return { ...best, dE: bestD };
+  }
+
+  function rgbToHsv(r,g,b){
+    const rf=r/255, gf=g/255, bf=b/255;
+    const max=Math.max(rf,gf,bf), min=Math.min(rf,gf,bf);
+    const d=max-min;
+    let h=0;
+    if(d===0) h=0;
+    else if(max===rf) h=(60*((gf-bf)/d)+360)%360;
+    else if(max===gf) h=(60*((bf-rf)/d)+120);
+    else if(max===bf) h=(60*((rf-gf)/d)+240);
+    const s = max===0 ? 0 : d/max;
+    const v = max;
+    // Match OpenCV ranges: H:0-179, S:0-255, V:0-255
+    return [ Math.round(h/2), Math.round(s*255), Math.round(v*255) ];
+  }
+
+  // Camera
+  async function startCamera(){
+    if(currentStream){
+      currentStream.getTracks().forEach(t => t.stop());
+      currentStream = null;
+    }
+    try{
+      const stream = await navigator.mediaDevices.getUserMedia({
+        video: { facingMode, width: { ideal: 1280 }, height: { ideal: 720 } },
+        audio: false
+      });
+      currentStream = stream;
+      video.srcObject = stream;
+      await video.play();
+      resizeOverlay();
+      status('Běží', true);
+      analyzeLoop();
+    }catch(err){
+      console.error(err);
+      alert('Nepodařilo se spustit kameru: ' + err.message);
+      status('Chyba', false);
+    }
+  }
+
+  function stopCamera(){
+    if(currentStream){
+      currentStream.getTracks().forEach(t => t.stop());
+      currentStream = null;
+    }
+    status('Neaktivní', false);
+  }
+
+  function status(text, active){
+    statusBadge.textContent = text;
+    statusBadge.style.background = active ? 'rgba(52, 211, 153, 0.15)' : 'rgba(239, 68, 68, 0.12)';
+    statusBadge.style.borderColor = active ? 'rgba(52, 211, 153, 0.45)' : 'rgba(239, 68, 68, 0.35)';
+  }
+
+  function resizeOverlay(){
+    const rect = video.getBoundingClientRect();
+    overlay.width = rect.width;
+    overlay.height = rect.height;
+  }
+  window.addEventListener('resize', resizeOverlay);
+
+  // ROI selection events on overlay
+  overlay.addEventListener('mousedown', (e)=>{
+    if(!useRoi.checked) return;
+    const r = overlay.getBoundingClientRect();
+    dragStart = { x: e.clientX - r.left, y: e.clientY - r.top };
+    roi = { x: dragStart.x, y: dragStart.y, w: 0, h: 0 };
+  });
+  overlay.addEventListener('mousemove', (e)=>{
+    if(!useRoi.checked || !dragStart) return;
+    const r = overlay.getBoundingClientRect();
+    const x = e.clientX - r.left, y = e.clientY - r.top;
+    roi.w = x - dragStart.x;
+    roi.h = y - dragStart.y;
+    drawOverlay([], roi);
+  });
+  overlay.addEventListener('mouseup', ()=>{
+    dragStart = null;
+  });
+  overlay.addEventListener('mouseleave', ()=>{
+    dragStart = null;
+  });
+  useRoi.addEventListener('change', ()=>{
+    if(!useRoi.checked){ roi = null; drawOverlay([]); }
+  });
+
+  startBtn.addEventListener('click', ()=>{
+    if(currentStream) { stopCamera(); }
+    else { startCamera(); }
+  });
+  flipBtn.addEventListener('click', ()=>{
+    facingMode = (facingMode === 'environment') ? 'user' : 'environment';
+    startCamera();
+  });
+
+  sRange.addEventListener('input', ()=>{
+    sVal.textContent = sRange.value;
+    sVal2.textContent = sRange.value;
+  });
+  vRange.addEventListener('input', ()=>{
+    vVal.textContent = vRange.value;
+    vVal2.textContent = vRange.value;
+  });
+  minCoverage.addEventListener('input', ()=>{
+    minCoverageLabel.textContent = minCoverage.value + '%';
+  });
+
+  // Drawing overlay
+  function drawOverlay(maskPoints, roiRect){
+    const ctx = overlay.getContext('2d');
+    ctx.clearRect(0,0,overlay.width,overlay.height);
+
+    // Draw yellow mask (as scattered points)
+    if(maskPoints && maskPoints.length){
+      ctx.fillStyle = 'rgba(255, 210, 0, 0.35)';
+      for(const p of maskPoints){
+        ctx.fillRect(p.x, p.y, 2, 2);
+      }
+    }
+
+    // Draw ROI rectangle
+    if(roiRect){
+      const x = Math.min(roiRect.x, roiRect.x + roiRect.w);
+      const y = Math.min(roiRect.y, roiRect.y + roiRect.h);
+      const w = Math.abs(roiRect.w);
+      const h = Math.abs(roiRect.h);
+      ctx.strokeStyle = 'rgba(255,255,255,0.9)';
+      ctx.setLineDash([6,4]);
+      ctx.lineWidth = 2;
+      ctx.strokeRect(x,y,w,h);
+      ctx.setLineDash([]);
+    }
+  }
+
+  // Analysis
+  const processCanvas = document.createElement('canvas');
+  const pctx = processCanvas.getContext('2d', { willReadFrequently: true });
+
+  let lastT = 0;
+  async function analyzeLoop(ts){
+    if(!currentStream){ confBar.style.width = '0%'; confText.textContent='0%'; requestAnimationFrame(analyzeLoop); return; }
+
+    if(!lastT || ts - lastT > 90){ // ~11 fps
+      lastT = ts || performance.now();
+      analyzeFrame();
+    }
+    requestAnimationFrame(analyzeLoop);
+  }
+
+  function analyzeFrame(){
+    const vw = video.videoWidth, vh = video.videoHeight;
+    if(!vw || !vh) return;
+
+    // processing resolution (downscale for speed)
+    const outW = 320;
+    const scale = outW / vw;
+    const outH = Math.round(vh * scale);
+    processCanvas.width = outW;
+    processCanvas.height = outH;
+    pctx.drawImage(video, 0, 0, outW, outH);
+
+    const frame = pctx.getImageData(0, 0, outW, outH);
+    const data = frame.data;
+
+    // Determine ROI in processing coordinates
+    let roiPx = { x:0, y:0, w:outW, h:outH };
+    if(useRoi.checked && roi){
+      // Map overlay coords -> processing coords
+      const ovw = overlay.width, ovh = overlay.height;
+      if(ovw && ovh){
+        const rx = Math.min(roi.x, roi.x + roi.w) / ovw;
+        const ry = Math.min(roi.y, roi.y + roi.h) / ovh;
+        const rw = Math.abs(roi.w) / ovw;
+        const rh = Math.abs(roi.h) / ovh;
+        roiPx = {
+          x: Math.round(rx * outW),
+          y: Math.round(ry * outH),
+          w: Math.max(2, Math.round(rw * outW)),
+          h: Math.max(2, Math.round(rh * outH)),
+        };
+      }
+    }
+
+    const Smin = parseInt(sRange.value,10);
+    const Vmin = parseInt(vRange.value,10);
+    const Hmin = 20, Hmax = 38; // OpenCV-like range 0..179
+    const minCov = parseInt(minCoverage.value,10) / 100;
+
+    // Iterate pixels in ROI
+    let count = 0, yellowCount = 0;
+    let sumR = 0, sumG = 0, sumB = 0;
+    let hueHist = new Array(180).fill(0);
+    let maskPoints = [];
+    const step = 2; // subsample for speed
+    for(let y = roiPx.y; y < roiPx.y + roiPx.h; y += step){
+      for(let x = roiPx.x; x < roiPx.x + roiPx.w; x += step){
+        const idx = (y*outW + x) * 4;
+        const r = data[idx], g = data[idx+1], b = data[idx+2];
+        const [h,s,v] = rgbToHsv(r,g,b);
+        count++;
+        if(h >= Hmin && h <= Hmax && s >= Smin && v >= Vmin){
+          yellowCount++;
+          sumR += r; sumG += g; sumB += b;
+          hueHist[h]++;
+          // Schedule overlay point in screen coords
+          // Map processing coords -> overlay coords
+          const ovx = (x/outW) * overlay.width;
+          const ovy = (y/outH) * overlay.height;
+          maskPoints.push({x: ovx, y: ovy});
+        }
+      }
+    }
+
+    let coverage = (count>0) ? (yellowCount / count) : 0;
+
+    let isYellow = false;
+    let domHex = '—';
+    let domHSV = '—';
+    let shade = '—';
+    let conf = 0;
+    let rgb = [0,0,0];
+
+    if(yellowCount > 0){
+      // dominant hue peak among yellow
+      let peakH = 0; let peakVal = -1;
+      for(let h=Hmin; h<=Hmax; h++){
+        if(hueHist[h] > peakVal){ peakVal = hueHist[h]; peakH = h; }
+      }
+      // Recompute mean around peak band ±4
+      let sumR2=0,sumG2=0,sumB2=0, n2=0;
+      for(let y = roiPx.y; y < roiPx.y + roiPx.h; y += step){
+        for(let x = roiPx.x; x < roiPx.x + roiPx.w; x += step){
+          const idx = (y*outW + x) * 4;
+          const r = data[idx], g = data[idx+1], b = data[idx+2];
+          const [h,s,v] = rgbToHsv(r,g,b);
+          if(h >= peakH-4 && h <= peakH+4 && s >= Smin && v >= Vmin){
+            sumR2 += r; sumG2 += g; sumB2 += b; n2++;
+          }
+        }
+      }
+      if(n2>0){
+        rgb = [ Math.round(sumR2/n2), Math.round(sumG2/n2), Math.round(sumB2/n2) ];
+      }else{
+        rgb = [ Math.round(sumR/yellowCount), Math.round(sumG/yellowCount), Math.round(sumB/yellowCount) ];
+      }
+      const [h,s,v] = rgbToHsv(rgb[0], rgb[1], rgb[2]);
+      domHSV = `(${h}, ${s}, ${v})`;
+      domHex = rgbToHex(rgb[0], rgb[1], rgb[2]);
+
+      // Decision & confidence
+      isYellow = (h >= Hmin && h <= Hmax && s >= Smin && v >= Vmin) && (coverage >= minCov);
+      const nn = nearestNamedYellow(rgb[0], rgb[1], rgb[2]);
+      shade = nn.name;
+      // Confidence: mix of coverage and palette closeness
+      const closeness = Math.max(0, 1 - nn.dE/50);
+      conf = 0.6*coverage + 0.4*closeness;
+    }
+
+    // Update UI
+    drawOverlay(maskPoints.slice(0, 4000), roi && useRoi.checked ? roi : null); // cap points for perf
+
+    const pct = clamp(conf*100, 0, 100);
+    confBar.style.width = pct.toFixed(0) + '%';
+    confText.textContent = pct.toFixed(0) + '%';
+
+    coverageEl.textContent = (coverage*100).toFixed(1) + '%';
+    hexCodeEl.textContent = domHex;
+    shadeNameEl.textContent = shade;
+    if(domHex && domHex !== '—'){ swatch.style.background = domHex; }
+
+    hsvDomEl.textContent = domHSV;
+
+    if(isYellow){
+      statusBadge.textContent = 'ŽLUTÉ ✅';
+      statusBadge.style.background = 'rgba(52,211,153,0.15)';
+      statusBadge.style.borderColor = 'rgba(52,211,153,0.45)';
+    }else{
+      statusBadge.textContent = 'NENÍ ŽLUTÉ';
+      statusBadge.style.background = 'rgba(239,68,68,0.12)';
+      statusBadge.style.borderColor = 'rgba(239,68,68,0.35)';
+    }
+  }
+
+  // Sync labels initial
+  sVal.textContent = sRange.value; sVal2.textContent = sRange.value;
+  vVal.textContent = vRange.value; vVal2.textContent = vRange.value;
+  minCoverageLabel.textContent = minCoverage.value + '%';
+
+})();</script>
+</body>
+</html>
